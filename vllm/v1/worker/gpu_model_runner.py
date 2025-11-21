@@ -25,6 +25,7 @@ from vllm.attention.backends.abstract import (
     AttentionMetadata,
     MultipleOf,
 )
+from vllm.compression import ArithmeticCodecMode, ArithmeticCodecRuntimeState
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.cuda_graph import CUDAGraphWrapper
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
@@ -720,6 +721,15 @@ class GPUModelRunner(
                 to_update = model.pooler.get_pooling_updates(task)
                 to_update.apply(pooling_params)
 
+            arithmetic_state = None
+            if sampling_params and sampling_params.arithmetic_codec:
+                codec_cfg = sampling_params.arithmetic_codec
+                mode = ArithmeticCodecMode(codec_cfg.mode)
+                arithmetic_state = ArithmeticCodecRuntimeState(
+                    mode=mode,
+                    precision_bits=codec_cfg.precision_bits,
+                    initial_bytes=codec_cfg.initial_state,
+                )
             req_state = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
@@ -732,6 +742,7 @@ class GPUModelRunner(
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
+                arithmetic_state=arithmetic_state,
             )
             self.requests[req_id] = req_state
 
@@ -2364,6 +2375,7 @@ class GPUModelRunner(
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
+        codec_chunks = sampler_output.codec_chunks
         invalid_req_indices = []
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
@@ -2843,6 +2855,7 @@ class GPUModelRunner(
                 if self.supports_mm_inputs
                 else None,
                 num_nans_in_logits=num_nans_in_logits,
+                codec_chunks=codec_chunks,
             )
 
         if not self.use_async_scheduling:

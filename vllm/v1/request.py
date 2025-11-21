@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
+from vllm.compression import ArithmeticCodecMode, ArithmeticCodecRuntimeState
 from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
 from vllm.sampling_params import SamplingParams
@@ -81,6 +82,17 @@ class Request:
                 )
         else:
             raise ValueError("sampling_params and pooling_params can't both be unset")
+
+        if sampling_params and sampling_params.arithmetic_codec is not None:
+            codec_cfg = sampling_params.arithmetic_codec
+            mode = ArithmeticCodecMode(codec_cfg.mode)
+            self.arithmetic_state = ArithmeticCodecRuntimeState(
+                mode=mode,
+                precision_bits=codec_cfg.precision_bits,
+                initial_bytes=codec_cfg.initial_state,
+            )
+        else:
+            self.arithmetic_state = None
 
         self.prompt_token_ids = prompt_token_ids
         self.prompt_embeds = prompt_embeds

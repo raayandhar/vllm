@@ -29,7 +29,7 @@ def mock_sampler_output(
     rejection_sampler: RejectionSampler, bonus_token_ids: torch.Tensor
 ):
     rejection_sampler.sampler.return_value = SamplerOutput(
-        sampled_token_ids=bonus_token_ids, logprobs_tensors=None
+        sampled_token_ids=bonus_token_ids, logprobs_tensors=None, codec_chunks=None
     )
 
 

@@ -149,6 +149,8 @@ class Processor:
             raise ValueError(
                 "vLLM V1 does not support per request user provided logits processors."
             )
+        if params.arithmetic_codec is not None and params.n != 1:
+            raise ValueError("Arithmetic codec mode only supports n=1 requests.")
 
     def _validate_params(
         self,

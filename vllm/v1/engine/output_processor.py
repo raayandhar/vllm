@@ -135,6 +135,7 @@ class RequestState:
         # Stream Interval
         self.stream_interval = stream_interval
         self.sent_tokens_offset = 0  # Offset of sent tokens
+        self._codec_chunk_buffer: list[bytes] = []
 
     @classmethod
     def from_new_request(
@@ -297,7 +298,19 @@ class RequestState:
             kv_transfer_params=kv_transfer_params,
             num_cached_tokens=self.num_cached_tokens,
             metrics=self.stats,
+            codec_chunks=self._drain_codec_chunks(),
         )
+
+    def add_codec_chunk(self, chunk: bytes) -> None:
+        if chunk:
+            self._codec_chunk_buffer.append(chunk)
+
+    def _drain_codec_chunks(self) -> list[bytes] | None:
+        if not self._codec_chunk_buffer:
+            return None
+        chunks = self._codec_chunk_buffer
+        self._codec_chunk_buffer = []
+        return chunks
 
     def _new_completion_output(
         self,
@@ -460,6 +473,9 @@ class OutputProcessor:
             if req_state is None:
                 # Ignore output for already-aborted request.
                 continue
+
+            if engine_core_output.codec_chunk:
+                req_state.add_codec_chunk(engine_core_output.codec_chunk)
 
             # 1) Compute stats for this iteration.
             self._update_stats_from_output(

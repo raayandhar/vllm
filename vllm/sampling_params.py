@@ -7,7 +7,7 @@ import warnings
 from dataclasses import field
 from enum import Enum, IntEnum
 from functools import cached_property
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import msgspec
 from pydantic.dataclasses import dataclass
@@ -119,6 +119,20 @@ class RequestOutputKind(Enum):
     DELTA = 1
     # Do not return intermediate RequestOutput
     FINAL_ONLY = 2
+
+
+class ArithmeticCodecParams(
+    msgspec.Struct,
+    omit_defaults=True,  # type: ignore[call-arg]
+    dict=True,
+):  # type: ignore[call-arg]
+    mode: Literal["encode", "decode"]
+    precision_bits: Annotated[int, msgspec.Meta(ge=16, le=32)] = 32
+    initial_state: bytes | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("encode", "decode"):
+            raise ValueError(f"Unsupported codec mode: {self.mode}")
 
 
 class SamplingParams(
@@ -244,6 +258,7 @@ class SamplingParams(
     """Arbitrary additional args, that can be used by custom sampling
     implementations, plugins, etc. Not used by any in-tree sampling
     implementations."""
+    arithmetic_codec: ArithmeticCodecParams | None = None
 
     # Fields used for bad words
     bad_words: list[str] | None = None
@@ -284,6 +299,7 @@ class SamplingParams(
         logit_bias: dict[int, float] | dict[str, float] | None = None,
         allowed_token_ids: list[int] | None = None,
         extra_args: dict[str, Any] | None = None,
+        arithmetic_codec: ArithmeticCodecParams | None = None,
     ) -> "SamplingParams":
         if logit_bias is not None:
             # Convert token_id to integer
@@ -335,6 +351,7 @@ class SamplingParams(
             logit_bias=logit_bias,
             allowed_token_ids=allowed_token_ids,
             extra_args=extra_args,
+            arithmetic_codec=arithmetic_codec,
         )
 
     def __post_init__(self) -> None:

@@ -157,6 +157,7 @@ class RejectionSampler(nn.Module):
         return SamplerOutput(
             sampled_token_ids=output_token_ids,
             logprobs_tensors=logprobs_tensors,
+            codec_chunks=None,
         )
 
     def _get_logprobs_tensors(

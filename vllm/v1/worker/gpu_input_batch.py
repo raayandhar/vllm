@@ -8,6 +8,7 @@ from typing import cast
 import numpy as np
 import torch
 
+from vllm.compression import ArithmeticCodecRuntimeState
 from vllm.lora.request import LoRARequest
 from vllm.multimodal.inputs import MultiModalFeatureSpec
 from vllm.pooling_params import PoolingParams
@@ -45,6 +46,7 @@ class CachedRequestState:
 
     lora_request: LoRARequest | None = None
     prompt_embeds: torch.Tensor | None = None
+    arithmetic_state: ArithmeticCodecRuntimeState | None = None
 
     def __post_init__(self):
         self.num_prompt_tokens = length_from_prompt_token_ids_or_embeds(
@@ -97,6 +99,7 @@ class InputBatch:
 
         self._req_ids: list[str | None] = []
         self.req_id_to_index: dict[str, int] = {}
+        self.codec_states: list[ArithmeticCodecRuntimeState | None] = []
 
         # TODO(woosuk): This buffer could be too large if max_model_len is big.
         # Find a way to reduce the CPU memory usage.
@@ -307,10 +310,12 @@ class InputBatch:
             self._req_ids.append(req_id)
             self.req_output_token_ids.append(request.output_token_ids)
             self.spec_token_ids.append([])
+            self.codec_states.append(request.arithmetic_state)
         else:
             self._req_ids[req_index] = req_id
             self.req_output_token_ids[req_index] = request.output_token_ids
             self.spec_token_ids[req_index] = []
+            self.codec_states[req_index] = request.arithmetic_state
 
         self.req_id_to_index[req_id] = req_index
 
@@ -460,6 +465,8 @@ class InputBatch:
         self._req_ids[req_index] = None
         self.req_output_token_ids[req_index] = None
         self.spec_token_ids[req_index] = None
+        if req_index < len(self.codec_states):
+            self.codec_states[req_index] = None
 
         # LoRA
         lora_id = self.request_lora_mapping[req_index]
@@ -519,6 +526,10 @@ class InputBatch:
         self.num_tokens_no_spec[i1], self.num_tokens_no_spec[i2] = (
             self.num_tokens_no_spec[i2],
             self.num_tokens_no_spec[i1],
+        )
+        self.codec_states[i1], self.codec_states[i2] = (
+            self.codec_states[i2],
+            self.codec_states[i1],
         )
         self.num_prompt_tokens[i1], self.num_prompt_tokens[i2] = (
             self.num_prompt_tokens[i2],
@@ -623,6 +634,7 @@ class InputBatch:
             self._req_ids.clear()
             self.req_output_token_ids.clear()
             self.spec_token_ids.clear()
+            self.codec_states.clear()
             return
 
         # NOTE(woosuk): This function assumes that the empty_req_indices
@@ -654,6 +666,8 @@ class InputBatch:
             spec_token_ids = self.spec_token_ids[last_req_index]
             self.spec_token_ids[empty_index] = spec_token_ids
             self.spec_token_ids[last_req_index] = None
+            self.codec_states[empty_index] = self.codec_states[last_req_index]
+            self.codec_states[last_req_index] = None
 
             num_tokens = self.num_tokens[last_req_index]
             self.token_ids_cpu[empty_index, :num_tokens] = self.token_ids_cpu[
@@ -810,6 +824,10 @@ class InputBatch:
             )
             allowed_token_ids_mask = self.allowed_token_ids_mask[:num_reqs]
 
+        codec_states = self.codec_states[:num_reqs]
+        if not any(codec_states):
+            codec_states = None
+
         return SamplingMetadata(
             temperature=temperature,
             all_greedy=self.all_greedy,
@@ -828,6 +846,7 @@ class InputBatch:
             allowed_token_ids_mask=allowed_token_ids_mask,
             bad_words_token_ids=self.bad_words_token_ids,
             logitsprocs=self.logitsprocs,
+            codec_states=codec_states,
         )
 
     def get_pooling_params(self) -> list[PoolingParams]:

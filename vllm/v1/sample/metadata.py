@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import torch
 
+from vllm.compression import ArithmeticCodecRuntimeState
 from vllm.v1.sample.logits_processor import LogitsProcessors
 
 
@@ -42,3 +43,6 @@ class SamplingMetadata:
 
     # Speculative token ids
     spec_token_ids: list[list[int]] | None = None
+
+    # Optional arithmetic codec runtime states aligned with batch order.
+    codec_states: list[ArithmeticCodecRuntimeState | None] | None = None

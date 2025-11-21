@@ -5,6 +5,11 @@
 import torch
 import torch.nn as nn
 
+from vllm.compression import (
+    ArithmeticCodecMode,
+    ArithmeticCodecRuntimeState,
+    build_int_cdf,
+)
 from vllm.config.model import LogprobsMode
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.v1.outputs import LogprobsTensors, SamplerOutput
@@ -89,8 +94,25 @@ class Sampler(nn.Module):
         logits = self.apply_logits_processors(
             logits, sampling_metadata, predict_bonus_token
         )
+        codec_context: tuple[list[int], torch.Tensor] | None = None
+        codec_states = sampling_metadata.codec_states
+        if codec_states:
+            codec_indices = [
+                idx for idx, state in enumerate(codec_states) if state is not None
+            ]
+            if codec_indices:
+                index_tensor = torch.tensor(
+                    codec_indices, device=logits.device, dtype=torch.long
+                )
+                codec_logits = logits.index_select(0, index_tensor).clone()
+                codec_context = (codec_indices, codec_logits)
         # Sample the next token.
         sampled, processed_logprobs = self.sample(logits, sampling_metadata)
+        codec_chunks = None
+        if codec_context is not None:
+            codec_chunks = self._apply_arithmetic_codec(
+                sampled, codec_context, sampling_metadata
+            )
         if processed_logprobs is not None:
             raw_logprobs = processed_logprobs
         # Convert sampled token ids to int64 (long) type to ensure compatibility
@@ -122,6 +144,7 @@ class Sampler(nn.Module):
             # token per request.
             sampled_token_ids=sampled.unsqueeze(-1),
             logprobs_tensors=logprobs_tensors,
+            codec_chunks=codec_chunks,
         )
         return sampler_output
 
@@ -198,6 +221,50 @@ class Sampler(nn.Module):
             out=greedy_sampled,  # Reuse tensor
         )
         return sampled, processed_logprobs
+
+    def _apply_arithmetic_codec(
+        self,
+        sampled: torch.Tensor,
+        codec_context: tuple[list[int], torch.Tensor],
+        sampling_metadata: SamplingMetadata,
+    ) -> list[bytes | None] | None:
+        codec_indices, codec_logits = codec_context
+        codec_states = sampling_metadata.codec_states or []
+        num_reqs = sampled.shape[0]
+        chunk_results: list[bytes | None] = [None] * num_reqs
+        for local_idx, batch_idx in enumerate(codec_indices):
+            state = codec_states[batch_idx]
+            if state is None:
+                continue
+            logits_row = codec_logits[local_idx]
+            vocab_size = logits_row.shape[-1]
+            top_k_val = None
+            if sampling_metadata.top_k is not None:
+                tk = int(sampling_metadata.top_k[batch_idx].item())
+                if 0 < tk < vocab_size:
+                    top_k_val = tk
+            top_p_val = None
+            if sampling_metadata.top_p is not None:
+                tp = float(sampling_metadata.top_p[batch_idx].item())
+                if tp < 1.0 - _SAMPLING_EPS:
+                    top_p_val = tp
+            cdf = build_int_cdf(
+                logits_row,
+                state.precision_bits,
+                top_k_val,
+                top_p_val,
+            )
+            if state.mode == ArithmeticCodecMode.ENCODE:
+                token_id = int(sampled[batch_idx].item())
+                chunk = state.encode_token(cdf, token_id)
+                if chunk:
+                    chunk_results[batch_idx] = chunk
+            elif state.mode == ArithmeticCodecMode.DECODE:
+                token_id = state.decode_token(cdf)
+                sampled[batch_idx] = token_id
+        if any(chunk_results):
+            return chunk_results
+        return None
 
     @staticmethod
     def compute_logprobs(logits: torch.Tensor) -> torch.Tensor:

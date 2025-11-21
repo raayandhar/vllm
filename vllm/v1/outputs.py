@@ -111,6 +111,7 @@ class SamplerOutput:
     # PLACEHOLDER_TOKEN_ID (-1 by default) is used for padding.
     sampled_token_ids: torch.Tensor
     logprobs_tensors: LogprobsTensors | None
+    codec_chunks: list[bytes | None] | None = None
 
 
 @dataclass
@@ -180,6 +181,9 @@ class ModelRunnerOutput:
 
     # req_id -> num_nans_in_logits
     num_nans_in_logits: dict[str, int] | None = None
+
+    # Optional arithmetic codec chunks aligned with req_ids.
+    codec_chunks: list[bytes | None] | None = None
 
 
 # ModelRunnerOutput wrapper for async scheduling.

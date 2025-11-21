@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from vllm.compression import ArithmeticCodecMode
 from vllm.config import VllmConfig
 from vllm.distributed.ec_transfer.ec_connector.base import (
     ECConnectorMetadata,
@@ -972,6 +973,7 @@ class Scheduler(SchedulerInterface):
         pooler_outputs = model_runner_output.pooler_output
         num_nans_in_logits = model_runner_output.num_nans_in_logits
         kv_connector_output = model_runner_output.kv_connector_output
+        codec_chunks = model_runner_output.codec_chunks
 
         outputs: dict[int, list[EngineCoreOutput]] = defaultdict(list)
         spec_decoding_stats: SpecDecodingStats | None = None
@@ -1079,8 +1081,25 @@ class Scheduler(SchedulerInterface):
 
             # Get prompt logprobs for this request.
             prompt_logprobs_tensors = prompt_logprobs_dict.get(req_id)
-            if new_token_ids or pooler_output is not None or kv_transfer_params:
+            codec_chunk = None
+            if codec_chunks:
+                codec_chunk = codec_chunks[req_index]
+            if new_token_ids or pooler_output is not None or kv_transfer_params or codec_chunk:
                 # Add EngineCoreOutput for this Request.
+                if request.sampling_params and request.sampling_params.arithmetic_codec:
+                    state = getattr(request, "arithmetic_state", None)
+                    if (
+                        state is not None
+                        and request.get_finished_reason() is not None
+                        and state.mode == ArithmeticCodecMode.ENCODE
+                    ):
+                        final_chunk = state.finalize_encode()
+                        if final_chunk:
+                            if codec_chunk:
+                                codec_chunk += final_chunk
+                            else:
+                                codec_chunk = final_chunk
+                        request.arithmetic_state = None
                 outputs[request.client_index].append(
                     EngineCoreOutput(
                         request_id=req_id,
@@ -1095,6 +1114,7 @@ class Scheduler(SchedulerInterface):
                         trace_headers=request.trace_headers,
                         num_cached_tokens=request.num_cached_tokens,
                         num_nans_in_logits=request.num_nans_in_logits,
+                        codec_chunk=codec_chunk,
                     )
                 )
             else:

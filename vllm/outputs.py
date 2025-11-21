@@ -103,6 +103,8 @@ class RequestOutput:
                                   None if decoder-only.
         num_cached_tokens: The number of tokens with prefix cache hit.
         kv_transfer_params: The params for remote K/V transfer.
+        codec_chunks: Optional list of arithmetic codec payloads emitted since
+            the last output.
     """
 
     def __init__(
@@ -121,6 +123,7 @@ class RequestOutput:
         *,
         multi_modal_placeholders: MultiModalPlaceholderDict | None = None,
         kv_transfer_params: dict[str, Any] | None = None,
+        codec_chunks: list[bytes] | None = None,
         # Forward compatibility, code that uses args added in new release can
         # still run with older versions of vLLM without breaking.
         **kwargs: Any,
@@ -142,6 +145,7 @@ class RequestOutput:
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
         self.num_cached_tokens = num_cached_tokens
         self.kv_transfer_params = kv_transfer_params
+        self.codec_chunks = codec_chunks or []
 
     def add(self, next_output: "RequestOutput", aggregate: bool) -> None:
         """Merge subsequent RequestOutput into this one"""
@@ -172,6 +176,8 @@ class RequestOutput:
                     break
             else:
                 self.outputs.append(next_completion)
+        if next_output.codec_chunks:
+            self.codec_chunks.extend(next_output.codec_chunks)
 
     def __repr__(self) -> str:
         return (

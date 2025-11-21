@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from tests.v1.sample.utils import create_allowed_token_ids
+from vllm.compression import ArithmeticCodecMode, ArithmeticCodecRuntimeState
 from vllm.platforms import current_platform
 from vllm.utils.platform_utils import is_pin_memory_available
 from vllm.utils.torch_utils import make_tensor_with_pad
@@ -447,3 +448,50 @@ def test_sampler_bad_words(
                 assert logits_for_req[token_id] == -float("inf")
             else:
                 assert logits_for_req[token_id] != -float("inf")
+
+
+def test_arithmetic_codec_encode_decode_roundtrip():
+    sampler = Sampler()
+    logits = torch.tensor([[0.1, 1.5, 0.2]], dtype=torch.float32)
+    device = logits.device
+    metadata_kwargs = dict(
+        temperature=torch.ones(1, device=device),
+        all_greedy=False,
+        all_random=True,
+        top_p=None,
+        top_k=None,
+        generators={},
+        max_num_logprobs=None,
+        no_penalties=True,
+        prompt_token_ids=None,
+        frequency_penalties=torch.zeros(1, device=device),
+        presence_penalties=torch.zeros(1, device=device),
+        repetition_penalties=torch.ones(1, device=device),
+        output_token_ids=[[]],
+        spec_token_ids=[[]],
+        allowed_token_ids_mask=None,
+        bad_words_token_ids={},
+        logitsprocs=LogitsProcessors(),
+    )
+
+    encoder_state = ArithmeticCodecRuntimeState(
+        mode=ArithmeticCodecMode.ENCODE, precision_bits=16
+    )
+    encode_metadata = SamplingMetadata(codec_states=[encoder_state], **metadata_kwargs)
+    encode_output = sampler(logits.clone(), encode_metadata)
+    encoded_token = int(encode_output.sampled_token_ids.squeeze().item())
+    bitstream = bytearray()
+    if encode_output.codec_chunks and encode_output.codec_chunks[0]:
+        bitstream.extend(encode_output.codec_chunks[0])
+    bitstream.extend(encoder_state.finalize_encode())
+    assert bitstream, "Encoder should emit a non-empty bitstream."
+
+    decode_state = ArithmeticCodecRuntimeState(
+        mode=ArithmeticCodecMode.DECODE,
+        precision_bits=encoder_state.precision_bits,
+        initial_bytes=bytes(bitstream),
+    )
+    decode_metadata = SamplingMetadata(codec_states=[decode_state], **metadata_kwargs)
+    decode_output = sampler(logits.clone(), decode_metadata)
+    decoded_token = int(decode_output.sampled_token_ids.squeeze().item())
+    assert decoded_token == encoded_token

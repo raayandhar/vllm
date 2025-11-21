@@ -33,6 +33,7 @@ class Sampler(nn.Module):
             # token per request.
             sampled_token_ids=sampled.unsqueeze(-1),
             logprobs_tensors=None,
+            codec_chunks=None,
         )
         return sampler_output
 

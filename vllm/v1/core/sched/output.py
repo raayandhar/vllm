@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from vllm.multimodal.inputs import MultiModalFeatureSpec
     from vllm.pooling_params import PoolingParams
     from vllm.sampling_params import SamplingParams
+    from vllm.compression import ArithmeticCodecRuntimeState
     from vllm.v1.request import Request
 else:
     ECConnectorMetadata = object
@@ -28,6 +29,7 @@ else:
     MultiModalFeatureSpec = object
     PoolingParams = object
     SamplingParams = object
+    ArithmeticCodecRuntimeState = object
     Request = object
 
 
@@ -43,6 +45,7 @@ class NewRequestData:
     num_computed_tokens: int
     lora_request: LoRARequest | None
     prompt_embeds: "torch.Tensor | None" = None
+    arithmetic_state: "ArithmeticCodecRuntimeState | None" = None
 
     @classmethod
     def from_request(
@@ -60,6 +63,7 @@ class NewRequestData:
             num_computed_tokens=request.num_computed_tokens,
             lora_request=request.lora_request,
             prompt_embeds=request.prompt_embeds,
+            arithmetic_state=getattr(request, "arithmetic_state", None),
         )
 
     def __repr__(self) -> str:
