@@ -2375,7 +2375,6 @@ class GPUModelRunner(
 
         num_sampled_tokens = sampler_output.sampled_token_ids.shape[0]
         sampled_token_ids = sampler_output.sampled_token_ids
-        codec_chunks = sampler_output.codec_chunks
         invalid_req_indices = []
         if not self.use_async_scheduling:
             # Get the valid generated tokens.
@@ -2772,6 +2771,9 @@ class GPUModelRunner(
 
         with record_function_or_nullcontext("gpu_model_runner: sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
+
+        # Extract codec_chunks from sampler_output for use later
+        codec_chunks = sampler_output.codec_chunks
 
         def propose_draft_token_ids(sampled_token_ids):
             assert spec_decode_common_attn_metadata is not None

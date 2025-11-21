@@ -8,6 +8,7 @@ from .arithmetic import (
     ArithmeticCodecRuntimeState,
     ArithmeticDecoderState,
     ArithmeticEncoderState,
+    build_int_cdf,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "ArithmeticCodecRuntimeState",
     "ArithmeticDecoderState",
     "ArithmeticEncoderState",
+    "build_int_cdf",
 ]
