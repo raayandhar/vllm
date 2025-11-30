@@ -17,7 +17,10 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.sample.ops.bad_words import apply_bad_words
 from vllm.v1.sample.ops.logprobs import batched_count_greater_than
 from vllm.v1.sample.ops.penalties import apply_all_penalties
-from vllm.v1.sample.ops.topk_topp_sampler import TopKTopPSampler
+from vllm.v1.sample.ops.topk_topp_sampler import (
+    TopKTopPSampler,
+    apply_top_k_top_p,
+)
 
 _SAMPLING_EPS = 1e-5
 
@@ -94,7 +97,7 @@ class Sampler(nn.Module):
         logits = self.apply_logits_processors(
             logits, sampling_metadata, predict_bonus_token
         )
-        codec_context: tuple[list[int], torch.Tensor] | None = None
+        codec_context: tuple[list[int], torch.Tensor, torch.Tensor] | None = None
         codec_states = sampling_metadata.codec_states
         if codec_states:
             codec_indices = [
@@ -104,8 +107,7 @@ class Sampler(nn.Module):
                 index_tensor = torch.tensor(
                     codec_indices, device=logits.device, dtype=torch.long
                 )
-                codec_logits = logits.index_select(0, index_tensor).clone()
-                codec_context = (codec_indices, codec_logits)
+                codec_context = (codec_indices, index_tensor, logits)
         # Sample the next token.
         sampled, processed_logprobs = self.sample(logits, sampling_metadata)
         codec_chunks = None
@@ -225,10 +227,11 @@ class Sampler(nn.Module):
     def _apply_arithmetic_codec(
         self,
         sampled: torch.Tensor,
-        codec_context: tuple[list[int], torch.Tensor],
+        codec_context: tuple[list[int], torch.Tensor, torch.Tensor],
         sampling_metadata: SamplingMetadata,
     ) -> list[bytes | None] | None:
-        codec_indices, codec_logits = codec_context
+        codec_indices, index_tensor, logits_tensor = codec_context
+        codec_logits = logits_tensor.index_select(0, index_tensor).clone()
         codec_states = sampling_metadata.codec_states or []
         num_reqs = sampled.shape[0]
         chunk_results: list[bytes | None] = [None] * num_reqs
@@ -236,23 +239,14 @@ class Sampler(nn.Module):
             state = codec_states[batch_idx]
             if state is None:
                 continue
-            logits_row = codec_logits[local_idx]
-            vocab_size = logits_row.shape[-1]
-            top_k_val = None
-            if sampling_metadata.top_k is not None:
-                tk = int(sampling_metadata.top_k[batch_idx].item())
-                if 0 < tk < vocab_size:
-                    top_k_val = tk
-            top_p_val = None
-            if sampling_metadata.top_p is not None:
-                tp = float(sampling_metadata.top_p[batch_idx].item())
-                if tp < 1.0 - _SAMPLING_EPS:
-                    top_p_val = tp
+            logits_row = self._codec_logits_after_sampling(
+                codec_logits[local_idx], batch_idx, sampling_metadata
+            )
             cdf = build_int_cdf(
                 logits_row,
                 state.precision_bits,
-                top_k_val,
-                top_p_val,
+                top_k=None,
+                top_p=None,
             )
             if state.mode == ArithmeticCodecMode.ENCODE:
                 token_id = int(sampled[batch_idx].item())
@@ -265,6 +259,36 @@ class Sampler(nn.Module):
         if any(chunk_results):
             return chunk_results
         return None
+
+    def _codec_logits_after_sampling(
+        self,
+        logits_row: torch.Tensor,
+        batch_idx: int,
+        sampling_metadata: SamplingMetadata,
+    ) -> torch.Tensor:
+        row = logits_row.unsqueeze(0).clone()
+        temp = sampling_metadata.temperature
+        if temp is not None:
+            temp_row = temp[batch_idx : batch_idx + 1]
+            row = self.apply_temperature(
+                row,
+                temp_row,
+                sampling_metadata.all_random,
+            )
+        for processor in sampling_metadata.logitsprocs.argmax_invariant:
+            row = processor.apply(row)
+        top_k_tensor = (
+            sampling_metadata.top_k[batch_idx : batch_idx + 1]
+            if sampling_metadata.top_k is not None
+            else None
+        )
+        top_p_tensor = (
+            sampling_metadata.top_p[batch_idx : batch_idx + 1]
+            if sampling_metadata.top_p is not None
+            else None
+        )
+        row = apply_top_k_top_p(row, top_k_tensor, top_p_tensor)
+        return row.squeeze(0)
 
     @staticmethod
     def compute_logprobs(logits: torch.Tensor) -> torch.Tensor:

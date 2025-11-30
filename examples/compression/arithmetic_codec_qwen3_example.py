@@ -19,7 +19,7 @@ import argparse
 from typing import Optional
 
 from vllm import EngineArgs, LLMEngine, SamplingParams
-from vllm.sampling_params import ArithmeticCodecParams
+from vllm.sampling_params import ArithmeticCodecParams, RequestOutputKind
 
 
 def encode_and_decode(
@@ -62,6 +62,7 @@ def encode_and_decode(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
+        output_kind=RequestOutputKind.DELTA,
         arithmetic_codec=ArithmeticCodecParams(
             mode="encode",
             precision_bits=precision_bits,
@@ -128,6 +129,7 @@ def encode_and_decode(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
+        output_kind=RequestOutputKind.DELTA,
         arithmetic_codec=ArithmeticCodecParams(
             mode="decode",
             precision_bits=precision_bits,
@@ -287,4 +289,3 @@ def main():
 
 if __name__ == "__main__":
     exit(main())
-

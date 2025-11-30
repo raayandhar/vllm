@@ -10,6 +10,12 @@ from .arithmetic import (
     ArithmeticEncoderState,
     build_int_cdf,
 )
+from .dataset_codec import (
+    DatasetArithmeticCodec,
+    DatasetCompressionResult,
+    decode_with_fixed_cdf,
+    encode_with_fixed_cdf,
+)
 
 __all__ = [
     "ArithmeticCodecMode",
@@ -17,4 +23,8 @@ __all__ = [
     "ArithmeticDecoderState",
     "ArithmeticEncoderState",
     "build_int_cdf",
+    "DatasetArithmeticCodec",
+    "DatasetCompressionResult",
+    "decode_with_fixed_cdf",
+    "encode_with_fixed_cdf",
 ]
