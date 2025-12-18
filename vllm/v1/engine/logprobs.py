@@ -173,6 +173,12 @@ class LogprobsProcessor:
         wherein all prompt logprobs are returned at once at
         the end of prefill.
 
+        Note: This method works correctly for compression mode
+        (prefill-only) requests where no sampled tokens are produced.
+        The scheduler emits an EngineCoreOutput with prompt logprobs
+        even when new_token_ids is empty, allowing prompt logprobs
+        to be returned without any generated tokens.
+
         Returns:
           None if prompt logprobs are disabled for this request.
           List of all prompt logprobs, otherwise.

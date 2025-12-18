@@ -190,6 +190,15 @@ class SamplingParams(
     NOTE: GC costs of FlatLogprobs is significantly smaller than
     list[dict[int, Logprob]]. After enabled, PromptLogprobs and
     SampleLogprobs would populated as FlatLogprobs."""
+    compression_mode: bool = False
+    """Enable compression mode for teacher-forced top-k probability export.
+    When enabled, the engine runs prefill-only (no token generation) and
+    returns processed prompt logprobs suitable for arithmetic coding.
+    Automatically sets max_tokens=0 and requires prompt_logprobs to be set."""
+    compression_top_k: int | None = None
+    """Number of top-k token probabilities to return per position in
+    compression mode. If set, overrides prompt_logprobs. Falls back to
+    prompt_logprobs if not specified."""
     # NOTE: This parameter is only exposed at the engine level for now.
     # It is not exposed in the OpenAI API server, as the OpenAI API does
     # not support returning only a list of token IDs.
@@ -260,6 +269,8 @@ class SamplingParams(
         min_tokens: int = 0,
         logprobs: int | None = None,
         prompt_logprobs: int | None = None,
+        compression_mode: bool = False,
+        compression_top_k: int | None = None,
         detokenize: bool = True,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
@@ -300,6 +311,8 @@ class SamplingParams(
             min_tokens=min_tokens,
             logprobs=logprobs,
             prompt_logprobs=prompt_logprobs,
+            compression_mode=compression_mode,
+            compression_top_k=compression_top_k,
             detokenize=detokenize,
             skip_special_tokens=skip_special_tokens,
             spaces_between_special_tokens=spaces_between_special_tokens,
@@ -342,6 +355,13 @@ class SamplingParams(
 
         if self.prompt_logprobs is True:
             self.prompt_logprobs = 1
+
+        # Compression mode: auto-set prompt_logprobs and max_tokens
+        if self.compression_mode:
+            if self.compression_top_k is not None and self.prompt_logprobs is None:
+                self.prompt_logprobs = self.compression_top_k
+            # Compression mode is prefill-only, force max_tokens=0
+            self.max_tokens = 0
 
         # Number of characters to hold back for stop string evaluation
         # until sequence is finished.
@@ -401,13 +421,22 @@ class SamplingParams(
             )
         if not 0.0 <= self.min_p <= 1.0:
             raise ValueError(f"min_p must be in [0, 1], got {self.min_p}.")
+        # Allow max_tokens=0 for compression mode (prefill only)
         if self.max_tokens is not None and self.max_tokens < 1:
-            raise ValueError(f"max_tokens must be at least 1, got {self.max_tokens}.")
+            if not (self.compression_mode and self.max_tokens == 0):
+                raise ValueError(
+                    f"max_tokens must be at least 1, got {self.max_tokens}."
+                )
         if self.min_tokens < 0:
             raise ValueError(
                 f"min_tokens must be greater than or equal to 0, got {self.min_tokens}."
             )
-        if self.max_tokens is not None and self.min_tokens > self.max_tokens:
+        # Skip min_tokens vs max_tokens check for compression mode (no generation)
+        if (
+            self.max_tokens is not None
+            and self.min_tokens > self.max_tokens
+            and not self.compression_mode
+        ):
             raise ValueError(
                 f"min_tokens must be less than or equal to "
                 f"max_tokens={self.max_tokens}, got {self.min_tokens}."
@@ -444,6 +473,33 @@ class SamplingParams(
             raise ValueError(
                 "stop strings are only supported when detokenize is True. "
                 "Set detokenize=True to use stop."
+            )
+        self._verify_compression_mode()
+
+    def _verify_compression_mode(self) -> None:
+        if not self.compression_mode:
+            return
+        # Compression mode validation
+        if self.n > 1:
+            raise ValueError(
+                "n must be 1 when using compression mode (no sampling), "
+                f"got {self.n}."
+            )
+        # Note: max_tokens is forced to 0 in __post_init__ for compression mode
+        if self.prompt_logprobs is None:
+            raise ValueError(
+                "prompt_logprobs must be set when using compression mode. "
+                "Set prompt_logprobs to the desired top-k value, or use "
+                "compression_top_k to set it automatically."
+            )
+        if (
+            self.compression_top_k is not None
+            and self.compression_top_k != -1
+            and self.compression_top_k < 1
+        ):
+            raise ValueError(
+                f"compression_top_k must be at least 1 or -1, "
+                f"got {self.compression_top_k}."
             )
 
     def _verify_greedy_sampling(self) -> None:

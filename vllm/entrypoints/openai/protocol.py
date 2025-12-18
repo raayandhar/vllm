@@ -391,6 +391,22 @@ class ResponsesRequest(OpenAIBaseModel):
     # this cannot be used in conjunction with previous_response_id
     # TODO: consider supporting non harmony messages as well
     previous_input_messages: list[OpenAIHarmonyMessage | dict] | None = None
+    compression: bool = Field(
+        default=False,
+        description=(
+            "Enable compression mode for teacher-forced top-k probability "
+            "export. When enabled, runs prefill-only (no token generation) "
+            "and returns processed prompt logprobs suitable for arithmetic "
+            "coding. Sets max_tokens=0 automatically."
+        ),
+    )
+    compression_top_k: int | None = Field(
+        default=None,
+        description=(
+            "Number of top-k token probabilities to return per position in "
+            "compression mode. If set, overrides prompt_logprobs."
+        ),
+    )
     # --8<-- [end:responses-extra-params]
 
     _DEFAULT_SAMPLING_PARAMS = {
@@ -440,6 +456,8 @@ class ResponsesRequest(OpenAIBaseModel):
             max_tokens=max_tokens,
             logprobs=self.top_logprobs if self.is_include_output_logprobs() else None,
             stop_token_ids=stop_token_ids,
+            compression_mode=self.compression,
+            compression_top_k=self.compression_top_k,
             output_kind=(
                 RequestOutputKind.DELTA if self.stream else RequestOutputKind.FINAL_ONLY
             ),
@@ -577,6 +595,22 @@ class ChatCompletionRequest(OpenAIBaseModel):
     prompt_logprobs: int | None = None
     allowed_token_ids: list[int] | None = None
     bad_words: list[str] = Field(default_factory=list)
+    compression: bool = Field(
+        default=False,
+        description=(
+            "Enable compression mode for teacher-forced top-k probability "
+            "export. When enabled, runs prefill-only (no token generation) "
+            "and returns processed prompt logprobs suitable for arithmetic "
+            "coding. Sets max_tokens=0 automatically."
+        ),
+    )
+    compression_top_k: int | None = Field(
+        default=None,
+        description=(
+            "Number of top-k token probabilities to return per position in "
+            "compression mode. If set, overrides prompt_logprobs."
+        ),
+    )
     # --8<-- [end:chat-completion-sampling-params]
 
     # --8<-- [start:chat-completion-extra-params]
@@ -826,6 +860,8 @@ class ChatCompletionRequest(OpenAIBaseModel):
             stop_token_ids=self.stop_token_ids,
             logprobs=self.top_logprobs if self.logprobs else None,
             prompt_logprobs=prompt_logprobs,
+            compression_mode=self.compression,
+            compression_top_k=self.compression_top_k,
             ignore_eos=self.ignore_eos,
             max_tokens=max_tokens,
             min_tokens=self.min_tokens,
@@ -1043,6 +1079,22 @@ class CompletionRequest(OpenAIBaseModel):
     truncate_prompt_tokens: Annotated[int, Field(ge=-1)] | None = None
     allowed_token_ids: list[int] | None = None
     prompt_logprobs: int | None = None
+    compression: bool = Field(
+        default=False,
+        description=(
+            "Enable compression mode for teacher-forced top-k probability "
+            "export. When enabled, runs prefill-only (no token generation) "
+            "and returns processed prompt logprobs suitable for arithmetic "
+            "coding. Sets max_tokens=0 automatically."
+        ),
+    )
+    compression_top_k: int | None = Field(
+        default=None,
+        description=(
+            "Number of top-k token probabilities to return per position in "
+            "compression mode. If set, overrides prompt_logprobs."
+        ),
+    )
     # --8<-- [end:completion-sampling-params]
 
     # --8<-- [start:completion-extra-params]
@@ -1257,6 +1309,8 @@ class CompletionRequest(OpenAIBaseModel):
             max_tokens=max_tokens if not echo_without_generation else 1,
             min_tokens=self.min_tokens,
             prompt_logprobs=prompt_logprobs,
+            compression_mode=self.compression,
+            compression_top_k=self.compression_top_k,
             skip_special_tokens=self.skip_special_tokens,
             spaces_between_special_tokens=self.spaces_between_special_tokens,
             include_stop_str_in_output=self.include_stop_str_in_output,

@@ -164,6 +164,23 @@ class InputProcessor:
                 "async scheduling with spec decoding doesn't yet support "
                 "penalties, bad words or structured outputs in sampling parameters."
             )
+        # Validate compression mode parameters
+        self._validate_compression_mode(params)
+
+    def _validate_compression_mode(
+        self,
+        params: SamplingParams,
+    ) -> None:
+        """Validate compression mode parameters."""
+        if not params.compression_mode:
+            return
+        # Compression mode requires prompt_logprobs
+        if params.prompt_logprobs is None:
+            raise ValueError(
+                "compression_mode requires prompt_logprobs to be set. "
+                "Set prompt_logprobs or compression_top_k to specify "
+                "the number of top probabilities to return."
+            )
 
     def _validate_params(
         self,

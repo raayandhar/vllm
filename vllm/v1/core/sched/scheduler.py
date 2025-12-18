@@ -1106,7 +1106,36 @@ class Scheduler(SchedulerInterface):
 
             # Get prompt logprobs for this request.
             prompt_logprobs_tensors = prompt_logprobs_dict.get(req_id)
-            if new_token_ids or pooler_output is not None or kv_transfer_params:
+
+            # Check for compression mode (prefill-only, no generation).
+            # For compression mode, we emit output after prefill is done
+            # even when there are no generated tokens. The presence of
+            # prompt_logprobs_tensors indicates prefill is complete
+            # (EngineCore only returns prompt logprobs after full prefill).
+            is_compression_mode = (
+                request.sampling_params is not None
+                and request.sampling_params.compression_mode
+            )
+            compression_prefill_done = (
+                is_compression_mode and prompt_logprobs_tensors is not None
+            )
+
+            # Finish compression mode request after prefill.
+            if compression_prefill_done and not stopped:
+                request.status = RequestStatus.FINISHED_STOPPED
+                kv_transfer_params = self._free_request(request)
+                stopped = True
+                if status_before_stop == RequestStatus.RUNNING:
+                    stopped_running_reqs.add(request)
+                else:
+                    stopped_preempted_reqs.add(request)
+
+            if (
+                new_token_ids
+                or pooler_output is not None
+                or kv_transfer_params
+                or compression_prefill_done
+            ):
                 # Add EngineCoreOutput for this Request.
                 outputs[request.client_index].append(
                     EngineCoreOutput(
@@ -1125,7 +1154,8 @@ class Scheduler(SchedulerInterface):
                     )
                 )
             else:
-                # Invariant: EngineCore returns no partial prefill outputs.
+                # Invariant: EngineCore returns no partial prefill outputs
+                # (unless in compression mode which is handled above).
                 assert not prompt_logprobs_tensors
 
         # Remove the stopped requests from the running and waiting queues.
