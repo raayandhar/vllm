@@ -161,10 +161,9 @@ def cuda_flashinfer_bf16_gemm_fake(
     weight: torch.Tensor,
     bias: torch.Tensor | None,
     backend: str,
-    pdl: bool,
 ) -> torch.Tensor:
     return torch.empty(
-        x.shape[0], weight.shape[0],
+        *x.shape[:-1], weight.shape[0],
         dtype=torch.bfloat16, device=x.device,
     )
 

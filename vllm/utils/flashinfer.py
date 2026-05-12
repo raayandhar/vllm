@@ -681,7 +681,7 @@ if has_flashinfer():
         # A is [M, K] BF16, B is [K, N] BF16 -> output [M, N] BF16.
         return torch.empty(
             A.shape[0],
-            B.shape[0],
+            B.shape[1],
             dtype=torch.bfloat16,
             device=A.device,
         )
