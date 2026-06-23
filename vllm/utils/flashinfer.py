@@ -1091,6 +1091,8 @@ def is_flashinfer_cudnn_fp8_prefill_attn_supported() -> bool:
 
 
 __all__ = [
+    "FLASHINFER_BF16_GEMM_BACKENDS",
+    "FLASHINFER_BF16_GEMM_BACKENDS_REQUIRING_NINJA",
     "has_flashinfer",
     "flashinfer_trtllm_fp8_block_scale_moe",
     "flashinfer_cutlass_fused_moe",
